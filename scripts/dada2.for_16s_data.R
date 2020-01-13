@@ -1,22 +1,26 @@
 ####DADA2 16S Amplicon Processing####
 # tortoise processing
 
-#may need to start R in the following way if you encounter vector memory full error -- can also add to bash profile: env R_MAX_VSIZE=700Gb R
+####DADA2 16S Amplicon Processing####
+#When running this script it's best to run it interactively in the R environment to be sure each step works as expected
+#there are also points within the protocol where you need to examine some output files to make decisions about quality
+#filtering, trimming, etc. Once you've run through the script and are sure everything is up to snuff you can re-run
+#from the terminal using: Rscript dada2.for_16s_dat.R whenever you need to (e.g., you noticed a mistake and you need to reprocess)
+#required packages: QIIME2, mafft, VSEARCH, CutAdapt, SeqTK, fasttree
+
+#may need to start R in the following way if you encounter vector memory full error -- can also add to bash profile: env R_MAX_VSIZE=700Gb Rscript dada2_processing.3.6.1.R
 
 ####CHANGE THESE####
-PATH="/Users/mann/github/tortoise/" #CHANGE ME to your working directory
-RAW="/Volumes/histolytica/tortoise/raw" #CHANGE ME to where your raw fastq files are
+PATH="/home/lymelab/lab_members/mann/tortoise/" #CHANGE ME to your working directory
+RAW="/home/lymelab/data/raw_data/tortoise" #CHANGE ME to where your raw fastq files are
 FWPRI="GTGYCAGCMGCCGCGGTAA" #CHANGE ME to your forward primer 
 RVPRI="GGACTACNVGGGTWTCTAAT" #CHANGE ME to your reverse primer 
-CUTAD="/usr/local/bin/cutadapt" #CHANGE ME to your cutadapt install (if you don't know where this is try the following command in your terminal: which cutadapt)
-REFDB="/Users/mann/refDB/silva_for_dada2/v132_for_parfreylab/16s/silva_132.16s.99_rep_set.dada2.fa.gz" #CHANGE ME to your reference database fasta file
+CUTAD="/usr/bin/cutadapt" #CHANGE ME to your cutadapt install (if you don't know where this is try the following command in your terminal: which cutadapt)
 FPAT="_R1_001.fastq.gz" #CHANGE ME to match the pattern in your forward reads
 RVPAT="_R2_001.fastq.gz" #CHANGE ME to match the pattern in your reverse reads
-VSEARCH="/usr/local/bin/vsearch"
-BACTAX="/Users/mann/refDB/ezbiocloud/ezbiocloud_id_taxonomy.txt" #change this to your bacterial reference db taxonomy file
-BACREF="/Users/mann/refDB/ezbiocloud/ezbiocloud_qiime_full.fasta" #change this to your bacterial reference db fasta file
-EUKTAX="/Users/mann/refDB/pr2/pr2_version_4.11.1_mothur.tax" #change this to your eukaryotic reference db taxonomy file
-EUKREF="/Users/mann/refDB/pr2/pr2_version_4.11.1_mothur.fasta" #change this to your eukaryotic reference db fasta file
+VSEARCH="/usr/bin/vsearch"
+BACTAX="/home/lymelab/reference_databases/EzBioCloud_16S_database_for_QIIME/ezbiocloud_id_taxonomy.qza" #change this to your bacterial reference db taxonomy file
+BACREF="/home/lymelab/reference_databases/EzBioCloud_16S_database_for_QIIME/ezbiocloud_qiime_full.qza" #change this to your bacterial reference db fasta file
 #####################
 
 ####Required Libraries####
@@ -48,10 +52,10 @@ sample.names <- sapply(strsplit(basename(fnFs), "_"), `[`, 1) #CHANGE the delimi
 ####fastq Quality Plots####
 # be sure to take a look at these, they should inform your read trimming decisions downstream
 pdf(paste(PATH,"forward_quality_plot.pdf", sep=""))
-plotQualityProfile(fnFs[1:20]) #this plots the quality profiles for each sample, if you have a lot of samples, it's best to look at just a few of them, the plots take a minute or two to generate even only showing 10-20 samples.
+plotQualityProfile(fnFs[1:10]) #this plots the quality profiles for each sample, if you have a lot of samples, it's best to look at just a few of them, the plots take a minute or two to generate even only showing 10-20 samples.
 dev.off()
 pdf(paste(PATH,"reverse_quality_plot.pdf",sep=""))
-plotQualityProfile(fnRs[1:20])
+plotQualityProfile(fnRs[1:10])
 dev.off()
 
 ####Primer Removal####
@@ -79,10 +83,10 @@ primerHits <- function(primer, fn) {
   nhits <- vcountPattern(primer, sread(readFastq(fn)), fixed = FALSE)
   return(sum(nhits > 0))
 }
-rbind(FWD.ForwardReads = sapply(FWD.orients, primerHits, fn = fnFs.filtN[[5]]), #add the index of the sample you'd like to use for this test (your first sample may be a blank/control and not have many sequences in it, be mindful of this)
-      FWD.ReverseReads = sapply(FWD.orients, primerHits, fn = fnRs.filtN[[5]]), 
-      REV.ForwardReads = sapply(REV.orients, primerHits, fn = fnFs.filtN[[5]]), 
-      REV.ReverseReads = sapply(REV.orients, primerHits, fn = fnRs.filtN[[5]]))
+rbind(FWD.ForwardReads = sapply(FWD.orients, primerHits, fn = fnFs.filtN[[2]]), #add the index of the sample you'd like to use for this test (your first sample may be a blank/control and not have many sequences in it, be mindful of this)
+      FWD.ReverseReads = sapply(FWD.orients, primerHits, fn = fnRs.filtN[[2]]), 
+      REV.ForwardReads = sapply(REV.orients, primerHits, fn = fnFs.filtN[[2]]), 
+      REV.ReverseReads = sapply(REV.orients, primerHits, fn = fnRs.filtN[[2]]))
 
 #### primer removal ####
 cutadapt <- CUTAD 
@@ -124,9 +128,8 @@ filtRs <- file.path(path.cut, "filtered", basename(cutRs))
 ####trim & filter####
 #filter and trim command. dada2 can canonically handle lots of errors, I am typically permissive in the maxEE parameter set here, in order to retain the maximum number of reads possible. error correction steps built into the dada2 pipeline have no trouble handling data with this many expected errors.
 #check out the DADA2 tutorial to see what each of the options in the command below do
-#make sure you know your cycle chemistry (e.g., 2x250, 2x150, etc) when chosing min length parameters
-out <- filterAndTrim(cutFs, filtFs, cutRs, filtRs, trimLeft=5, trimRight=25, minLen = c(150,120),
-                     maxN=c(0,0), maxEE=c(8,10), truncQ=c(2,2), rm.phix=TRUE, matchIDs=TRUE,
+out <- filterAndTrim(cutFs, filtFs, cutRs, filtRs, trimRight=50, minLen = c(150,120),
+                     maxN=c(0,0), maxEE=c(2,2), truncQ=c(2,2), rm.phix=TRUE, matchIDs=TRUE,
                      compress=TRUE, multithread=TRUE)
 retained <- as.data.frame(out)
 retained$percentage_retained <- retained$reads.out/retained$reads.in*100
@@ -162,7 +165,7 @@ dadaRs[[1]]
 #samples_to_keep <- as.numeric(out[,"reads.out"]) > 500 #example of simple method used above after the filter and trim step. if you already did this but still got an error when merging, try the steps below
 getN <- function(x) sum(getUniques(x)) #keeping track of read retention, number of unique sequences after ASV inference
 track <- cbind(sapply(derepFs, getN), sapply(derepRs, getN), sapply(dadaFs, getN), sapply(dadaRs, getN))
-samples_to_keep <- track[,4] > 1000 #your threshold. try different ones to get the lowest one that will work. #this method accounts for dereplication/ASVs left after inference
+samples_to_keep <- track[,4] > 500 #your threshold. try different ones to get the lowest one that will work. #this method accounts for dereplication/ASVs left after inference
 samples_to_remove <- names(samples_to_keep)[which(samples_to_keep == FALSE)] #record names of samples you have the option of removing
 
 ####merge paired reads####
@@ -233,14 +236,15 @@ write.table(data.frame("row_names"=rownames(track),track),"read_retention.16s.tx
 write.table(data.frame("row_names"=rownames(seqtab.nosingletons.nochim),seqtab.nosingletons.nochim),"sequence_table.16s.merged.txt", row.names=FALSE, quote=F, sep="\t")
 uniquesToFasta(seqtab.nosingletons.nochim, "rep_set.fa")
 system("awk '/^>/{print \">ASV\" ++i; next}{print}' < rep_set.fa > rep_set_fix.fa")
+system("mv rep_set_fix.fa rep_set.fa")
 
 ################Load back into R
 
 #if you must save your sequence table and load it back in before doing taxonomy assignments, here is how to reformat the object so that dada2 will accept it again
-seqtab.nosingletons.nochim <- fread("sequence_table.16s.merged.txt", sep="\t", header=T, colClasses = c("row_names"="character"), data.table=FALSE)
-row.names(seqtab.nosingletons.nochim) <- seqtab.nosingletons.nochim[,1] #set row names
-seqtab.nosingletons.nochim <- seqtab.nosingletons.nochim[,-1] #remove column with the row names in it
-seqtab.nosingletons.nochim <- as.matrix(seqtab.nosingletons.nochim) #cast the object as a matrix
+# seqtab.nosingletons.nochim <- fread("sequence_table.16s.merged.txt", sep="\t", header=T, colClasses = c("row_names"="character"), data.table=FALSE)
+# row.names(seqtab.nosingletons.nochim) <- seqtab.nosingletons.nochim[,1] #set row names
+# seqtab.nosingletons.nochim <- seqtab.nosingletons.nochim[,-1] #remove column with the row names in it
+# seqtab.nosingletons.nochim <- as.matrix(seqtab.nosingletons.nochim) #cast the object as a matrix
 
 # now replace the long ASV names (the actual sequences) with human-readable names, and save the new names and sequences as a .fasta file in your project working directory
 my_otu_table <- t(as.data.frame(seqtab.nosingletons.nochim)) #transposed (OTUs are rows) data frame. unclassing the otu_table() output avoids type/class errors later on
@@ -248,21 +252,31 @@ ASV.seq <- as.character(unclass(row.names(my_otu_table))) #store sequences in ch
 ASV.num <- paste0("ASV", seq(ASV.seq), sep='') #create new names
 colnames(seqtab.nosingletons.nochim) <- ASV.num #rename your ASVs in the taxonomy table and sequence table objects
 
-##assign taxonomy using vsearch
-##if using usearch instead of vsearch comment out the line below
-system2("alias", args = paste("uclust=", VSEARCH, sep=""))
-setwd(PATH)
-system2("assign_taxonomy.py", args = c("-i rep_set_fix.fa", paste("-t", BACTAX, sep=""), paste("-r", BACREF, sep=""), "-o assigntax", "-m uclust"))
+##assign taxonomy using VSEARCH and QIIME2
+#first need to convert reference sequences to qiime2 format
+#reference database should be in qiime format: qiime tools import --input-path ezbiocloud_qiime_full.fasta --output-path ezbiocloud_qiime_full.qza --type 'FeatureData[Sequence]'
+#also taxonomy file: qiime tools import --type 'FeatureData[Taxonomy]' --input-format HeaderlessTSVTaxonomyFormat --input-path ezbiocloud_id_taxonomy.txt --output-path ezbiocloud_id_taxonomy.qza
+#pull the region of interest from full length 16S sequences (is better for classification): qiime feature-classifier extract-reads --i-sequences ezbiocloud_qiime_full.qza --p-f-primer GTGYCAGCMGCCGCGGTAA --p-r-primer GGACTACNVGGGTWTCTAAT --p-min-length 200 --p-max-length 300 --o-reads ezbiocloud_qiime_v4region.qza
+system("/home/lymelab/miniconda2/envs/qiime2-2019.7/bin/qiime tools import --input-path rep_set_fix.fa --output-path rep_set_fix.qza --type 'FeatureData[Sequence]'")
+system("rm -r assigntax")
+system(sprintf("/home/lymelab/miniconda2/envs/qiime2-2019.7/bin/qiime feature-classifier classify-consensus-vsearch --i-query rep_set_fix.qza --i-reference-reads %s --i-reference-taxonomy %s --output-dir assigntax", BACREF, BACTAX))
+system("unzip assigntax/classification.qza -d assigntax/")
 
-##now pull unassigned and those without strong bac assignment (no phylum assignment), reassign these with eukaryotic database
-system2("grep", args= "-E 'Unassigned|Bacteria\t' assigntax/rep_set_fix_tax_assignments.txt | awk '{print $1}' > unassigned.ids")
-system2("filter_fasta.py", args= "-f rep_set_fix.fa -o unassigned.fa -s unassigned.ids")
-system2("assign_taxonomy.py", args = c("-i unassigned.fa", paste("-t", EUKTAX, sep=""), paste("-r", EUKREF, sep=""), "-o assigntax", "-m uclust"))
+#get file path for taxonomy file
+tempfile <- subset(dir(path="assigntax"), !grepl("classification.qza", dir(path="assigntax/")))
+newpath <- paste("assigntax/", tempfile, "/data/taxonomy.tsv", sep="")
+
+#make 7 level taxonomy file -- test this out on tortoise data
+system(sprintf("awk '{print $2}' %s | sed '1d' > taxonomy_strings.txt", newpath))
+system(sprintf("awk '{print $1}' %s | sed '1d' > asv_ids.txt", newpath))
+system("python fix_taxonomy_L7.py taxonomy_strings.txt > fix_string.txt")
+system("paste asv_ids.txt fix_string.txt > taxonomy_L7.txt")
+system("rm taxonomy_strings.txt fix_string.txt asv_ids.txt")
 
 ####combine sequence and taxonomy tables into one####
 #taxa will be the rows, columns will be samples, followed by each rank of taxonomy assignment, from rank1 (domain-level) to rank7/8 (species-level), followed by accession (if applicable)
 #first check if the row names of the taxonomy table match the column headers of the sequence table
-taxa <- read.table("assigntax/rep_set_fix_tax_assignments.txt", header=F, sep="\t", row.names=1)
+taxa <- read.table(newpath, header=T, sep="\t", row.names=1)
 length(which(row.names(taxa) %in% colnames(seqtab.nosingletons.nochim)))
 dim(taxa)
 dim(seqtab.nosingletons.nochim)
@@ -275,19 +289,17 @@ row.names(taxa) == colnames(seqtab.nosingletons.nochim) #IMPORTANT: only proceed
 
 #as long as the ordering of taxa is the same, you can combine like this (note you need to transpose the sequence table so that the taxa are in the rows)
 sequence_taxonomy_table <- cbind(t(seqtab.nosingletons.nochim), taxa)
-colnames(sequence_taxonomy_table)[colnames(sequence_taxonomy_table)=="V2"] <- "taxonomy"
-colnames(sequence_taxonomy_table)[colnames(sequence_taxonomy_table)=="V3"] <- "score"
-colnames(sequence_taxonomy_table)[colnames(sequence_taxonomy_table)=="V4"] <- "count"
 
 #now write to file
 write.table(data.frame("row_names"=rownames(sequence_taxonomy_table),sequence_taxonomy_table),"sequence_taxonomy_table.16s.merged.txt", row.names=FALSE, quote=F, sep="\t")
 
 #filter out unwanted taxonomic groups
-system("grep -v 'Unassigned' sequence_taxonomy_table.16s.merged.txt | awk '{print $1}' | grep 'A' > wanted.ids")
+system("grep -v -E 'Unassigned|Bacteria;unknown' sequence_taxonomy_table.16s.merged.txt | awk '{print $1}' | grep 'A' > wanted.ids")
 wanted <- read.table("wanted.ids", header=F)
 seqtab.filtered <- seqtab.nosingletons.nochim[, which(colnames(seqtab.nosingletons.nochim) %in% wanted$V1)]
+write.table(data.frame("row_names"=rownames(seqtab.filtered),seqtab.filtered),"sequence_table.16s.filtered.txt", row.names=FALSE, quote=F, sep="\t")
 
 #get representative seq tree
-system("filter_fasta.py -f rep_set_fix.fa -s wanted.ids -o rep_set.filt.fa")
+system("seqtk subseq rep_set.fa wanted.ids > rep_set.filt.fa")
 system("mafft --auto rep_set.filt.fa > rep_set.filt.align.fa")
-system("make_phylogeny.py -i rep_set.filt.align.fa -t fasttree -o rep_set.filt.tre")
+system("fasttree -nt rep_set.filt.align.fa > rep_set.filt.tre")
