@@ -244,7 +244,7 @@ rarecurve(otu_table(ps.dat), label=F)
 #INTERACTION NETWORK
 #####################
 #filter taxa
-ps.dat.filt <- filter_taxa(ps.dat, function(x) sum(x > 50) > (0.25*length(x)), T)
+ps.dat.filt <- filter_taxa(ps.dat, function(x) sum(x > 5) > (0.25*length(x)), T)
 spiec.out <- spiec.easi(ps.dat.filt, method='glasso', lambda.min.ratio=1e-2, nlambda=20, pulsar.params=list(rep.num=100))
 spiec.graph <- adj2igraph(getRefit(spiec.out), vertex.attr=list(name=taxa_names(ps.dat.filt)))
 
@@ -252,8 +252,57 @@ pdf("figs/microbe_network.pdf")
 plot_network(spiec.graph, ps.dat.filt, type='taxa', color="V3")
 dev.off()
 
-#with collapsed asvs into taxonomy labels, filtered: more than 50 reads, 25% of all samples
-seqtab.col <- read.table("collapsed_taxonomy_for_network.txt", header=T, row.names=1)
-spiec.out <- spiec.easi(as.matrix(seqtab.col), method='glasso', lambda.min.ratio=1e-2, nlambda=20, pulsar.params=list(rep.num=100))
+#collapse by genus 
+ps.g <- tax_glom(ps.dat.filt, taxrank=rank_names(ps.dat.filt)[5], NArm=T, bad_empty=c(NA, "", " ", "\t"))
+spiec.out <- spiec.easi(ps.g, method='mb', lambda.min.ratio=1e-2, nlambda=20, pulsar.params=list(rep.num=100))
+spiec.graph <- adj2igraph(getRefit(spiec.out), vertex.attr=list(name=taxa_names(ps.g)))
+
+#how many positive and negative edges inferred from network?
+betaMat <- as.matrix(symBeta(getOptBeta(spiec.out)))
+positive <- length(betaMat[betaMat>0])/2
+#64
+negative <- length(betaMat[betaMat<0])/2
+#23
+total <- length(betaMat[betaMat!=0])/2
+#87
+
+#visualize network with pos and neg edges with different colors
+# Col vector up to 74 color samples
+col_vector74 = c("#7FC97F","#BEAED4","#FDC086","#FFFF99","#386CB0","#F0027F","#BF5B17","#666666","#1B9E77","#D95F02","#7570B3","#E7298A","#66A61E","#E6AB02","#A6761D","#666666","#A6CEE3","#1F78B4","#B2DF8A","#33A02C","#FB9A99","#E31A1C","#FDBF6F","#FF7F00","#CAB2D6","#6A3D9A","#FFFF99","#B15928","#FBB4AE","#B3CDE3","#CCEBC5","#DECBE4","#FED9A6","#FFFFCC","#E5D8BD","#FDDAEC","#F2F2F2","#B3E2CD","#FDCDAC","#CBD5E8","#F4CAE4","#E6F5C9","#FFF2AE","#F1E2CC","#CCCCCC","#E41A1C","#377EB8","#4DAF4A","#984EA3","#FF7F00","#FFFF33","#A65628","#F781BF","#999999","#66C2A5","#FC8D62","#8DA0CB","#E78AC3","#A6D854","#FFD92F","#E5C494","#B3B3B3","#8DD3C7","#FFFFB3","#BEBADA","#FB8072","#80B1D3","#FDB462","#B3DE69","#FCCDE5","#D9D9D9","#BC80BD","#CCEBC5","#FFED6F")
+asv.ids <- colnames(spiec.out[[1]]$data)
+edges <- E(spiec.graph)
+edge_cols <- ifelse(betaMat>0, 'black', 'red')[upper.tri(betaMat) & betaMat!=0]
+E(spiec.graph)$color <- edge_cols
+
+#How many nodes connected at specific rank
+nb_nodes <- vcount(spiec.graph)
+tax_table(ps.g) <- tax_table(ps.g)[,getrank]
+asv_ids <- V(spiec.graph)$name
+idx <- which(row.names(tax_table(ps.g)) %in% asv_ids)
+taxa <- as.character(tax_table(ps.g)[,getrank])[idx]
+
+library(intergraph)
+library(ggnet)
+library(network)
+
+ig2 <- asNetwork(spiec.graph)
+network.vertex.names(ig2) <- taxa
+net <- ig2
+net %v% getrank <- as.character(taxa)
+y <- col_vector74[1:nb_nodes]
+names(y) <- levels(as.factor(taxa))
+
+#Plot the network
+pdf("figs/microbiome_network_genus.pdf")
+ggnet2(net, color = getrank, palette = y, size = 6, edge.size=1, edge.color="color", edge.alpha = 0.5, label = FALSE)
+dev.off()
+
+#write spiec-easi graph to file to load into cytoscape
+write.graph(spiec.graph, file="spieceasi.ncol.txt", format="ncol")
+system("sed -i 's/ /,/g' spieceasi.ncol.txt")
+
+
+
+
 
 
